@@ -1,5 +1,5 @@
--- palofsc // hood mod v3
--- keybind (klavye + mouse) + speed + silent aim + full esp
+-- palofsc // hood mod v4
+-- speed fix + yeni esp sistemi (box, corner, health, isim, mesafe)
 -- teknik yorumlar // Rusça
 
 local config = {
@@ -18,7 +18,6 @@ local config = {
     silent_part = "Head",
     silent_visible_check = false,
     silent_team_check = false,
-    silent_hit_chance = 100,
     -- esp
     esp_enabled = true,
     esp_color = Color3.fromRGB(255, 0, 0),
@@ -28,8 +27,10 @@ local config = {
     esp_name = true,
     esp_distance = true,
     esp_box = true,
+    esp_corner = false,
     esp_tracer = false,
     esp_max_distance = 1000,
+    esp_team_color = false,
     -- speed
     speed_enabled = false,
     speed_key = Enum.KeyCode.LeftControl,
@@ -37,8 +38,7 @@ local config = {
     speed_toggle_mode = true,
     -- ui
     ui_keybind = Enum.KeyCode.RightShift,
-    ui_visible = true,
-    ui_theme = "dark"
+    ui_visible = true
 }
 
 local Players = game:GetService("Players")
@@ -50,17 +50,23 @@ local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 
 -- ============================================
--- ESP SİSTEMİ
+-- ESP SİSTEMİ v2
 -- ============================================
 local esp_folder = Instance.new("Folder")
 esp_folder.Name = "palofsc_esp"
 esp_folder.Parent = workspace
 local esp_cache = {}
 
+-- çizim kütüphanesi
+local Drawing = Drawing or nil
+
 local function create_esp(player)
     if player == LocalPlayer then return end
     if esp_cache[player] then return end
+
     local esp = {}
+
+    -- highlight
     local highlight = Instance.new("Highlight")
     highlight.Name = "palofsc_highlight"
     highlight.Adornee = player.Character
@@ -71,6 +77,7 @@ local function create_esp(player)
     highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Parent = esp_folder
 
+    -- billboard (isim + mesafe + can)
     local billboard = Instance.new("BillboardGui")
     billboard.Name = "palofsc_billboard"
     billboard.Adornee = player.Character and player.Character:FindFirstChild("Head")
@@ -117,6 +124,7 @@ local function create_esp(player)
     health_bar.BorderSizePixel = 0
     health_bar.Parent = health_bar_bg
 
+    -- box esp (SelectionBox)
     local box = Instance.new("SelectionBox")
     box.Name = "palofsc_box"
     box.Adornee = player.Character
@@ -125,6 +133,7 @@ local function create_esp(player)
     box.Transparency = 1
     box.Parent = esp_folder
 
+    -- tracer
     local tracer = Instance.new("LineHandleAdornment")
     tracer.Name = "palofsc_tracer"
     tracer.Adornee = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -134,6 +143,19 @@ local function create_esp(player)
     tracer.AlwaysOnTop = true
     tracer.Parent = esp_folder
 
+    -- corner box (Drawing)
+    local corner_lines = {}
+    if Drawing then
+        for i = 1, 8 do
+            local line = Drawing.new("Line")
+            line.Visible = false
+            line.Color = config.esp_color
+            line.Thickness = 1
+            line.Transparency = 1
+            corner_lines[i] = line
+        end
+    end
+
     esp.highlight = highlight
     esp.billboard = billboard
     esp.name_label = name_label
@@ -142,6 +164,8 @@ local function create_esp(player)
     esp.health_bar_bg = health_bar_bg
     esp.box = box
     esp.tracer = tracer
+    esp.corner_lines = corner_lines
+
     esp_cache[player] = esp
 end
 
@@ -150,9 +174,71 @@ local function remove_esp(player)
         for _, v in pairs(esp_cache[player]) do
             if typeof(v) == "Instance" then
                 v:Destroy()
+            elseif typeof(v) == "table" then
+                for _, line in pairs(v) do
+                    if line and line.Remove then line:Remove() end
+                end
             end
         end
         esp_cache[player] = nil
+    end
+end
+
+-- corner box çizimi
+local function update_corner_box(esp, char)
+    if not Drawing or not esp.corner_lines or #esp.corner_lines == 0 then return end
+
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local head = char:FindFirstChild("Head")
+    if not hrp or not head then
+        for _, line in pairs(esp.corner_lines) do line.Visible = false end
+        return
+    end
+
+    local top = head.Position + Vector3.new(0, 0.6, 0)
+    local bottom = hrp.Position - Vector3.new(0, 3, 0)
+
+    local top_screen, top_on = Camera:WorldToViewportPoint(top)
+    local bottom_screen, bottom_on = Camera:WorldToViewportPoint(bottom)
+
+    if not top_on or not bottom_on then
+        for _, line in pairs(esp.corner_lines) do line.Visible = false end
+        return
+    end
+
+    local height = math.abs(bottom_screen.Y - top_screen.Y)
+    local width = height * 0.55
+    local x = top_screen.X - width / 2
+    local y = top_screen.Y
+
+    local corner_size = math.min(width, height) * 0.25
+
+    -- 8 çizgi: 4 köşe, her köşe 2 çizgi
+    local lines = esp.corner_lines
+    -- sol üst
+    lines[1].From = Vector2.new(x, y)
+    lines[1].To = Vector2.new(x + corner_size, y)
+    lines[2].From = Vector2.new(x, y)
+    lines[2].To = Vector2.new(x, y + corner_size)
+    -- sağ üst
+    lines[3].From = Vector2.new(x + width, y)
+    lines[3].To = Vector2.new(x + width - corner_size, y)
+    lines[4].From = Vector2.new(x + width, y)
+    lines[4].To = Vector2.new(x + width, y + corner_size)
+    -- sol alt
+    lines[5].From = Vector2.new(x, y + height)
+    lines[5].To = Vector2.new(x + corner_size, y + height)
+    lines[6].From = Vector2.new(x, y + height)
+    lines[6].To = Vector2.new(x, y + height - corner_size)
+    -- sağ alt
+    lines[7].From = Vector2.new(x + width, y + height)
+    lines[7].To = Vector2.new(x + width - corner_size, y + height)
+    lines[8].From = Vector2.new(x + width, y + height)
+    lines[8].To = Vector2.new(x + width, y + height - corner_size)
+
+    for _, line in pairs(lines) do
+        line.Visible = config.esp_corner
+        line.Color = config.esp_color
     end
 end
 
@@ -166,26 +252,37 @@ local function update_esp()
             local distance = (hrp.Position - Camera.CFrame.Position).Magnitude
             local visible = distance <= config.esp_max_distance
 
+            local color = config.esp_color
+            if config.esp_team_color and player.Team then
+                color = player.TeamColor.Color
+            end
+
             if esp.highlight then
                 esp.highlight.Adornee = char
-                esp.highlight.FillColor = config.esp_color
+                esp.highlight.FillColor = color
                 esp.highlight.FillTransparency = config.esp_fill and 0.5 or 1
                 esp.highlight.OutlineTransparency = config.esp_outline and 0 or 1
                 esp.highlight.Enabled = config.esp_enabled and visible
             end
+
             if esp.billboard then
                 esp.billboard.Adornee = head
-                esp.billboard.Enabled = config.esp_enabled and config.esp_name and visible
+                esp.billboard.Enabled = config.esp_enabled and (config.esp_name or config.esp_health or config.esp_distance) and visible
             end
+
             if humanoid and esp.info_label then
                 local health = math.floor(humanoid.Health)
                 local max_health = math.floor(humanoid.MaxHealth)
                 local health_percent = health / max_health
                 local text = ""
                 if config.esp_health then text = text .. "HP: " .. health .. "/" .. max_health end
-                if config.esp_distance then text = text .. " | " .. math.floor(distance) .. "m" end
+                if config.esp_distance then
+                    if text ~= "" then text = text .. " | " end
+                    text = text .. math.floor(distance) .. "m"
+                end
                 esp.info_label.Text = text
                 esp.info_label.Visible = (config.esp_health or config.esp_distance) and visible
+                esp.name_label.Visible = config.esp_name and visible
                 if esp.health_bar then
                     esp.health_bar.Size = UDim2.new(health_percent, 0, 1, 0)
                     esp.health_bar.BackgroundColor3 = Color3.fromRGB(
@@ -197,17 +294,21 @@ local function update_esp()
                     esp.health_bar_bg.Visible = config.esp_health and visible
                 end
             end
+
             if esp.box then
                 esp.box.Adornee = char
-                esp.box.Color3 = config.esp_color
+                esp.box.Color3 = color
                 esp.box.Transparency = (config.esp_box and visible) and 0 or 1
             end
+
             if esp.tracer then
                 esp.tracer.Adornee = hrp
-                esp.tracer.Color3 = config.esp_color
+                esp.tracer.Color3 = color
                 esp.tracer.Transparency = (config.esp_tracer and visible) and 0.3 or 1
                 esp.tracer.Visible = config.esp_tracer and visible
             end
+
+            update_corner_box(esp, char)
         end
     end
 end
@@ -304,26 +405,49 @@ end
 pcall(silent_aim_hook)
 
 -- ============================================
--- SPEED SİSTEMİ
+-- SPEED SİSTEMİ v2 (FIX)
 -- ============================================
 local speed_active = false
-local original_speed = 16
+local speed_connection = nil
 
 local function apply_speed()
-    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
-        LocalPlayer.Character:FindFirstChildOfClass("Humanoid").WalkSpeed = config.speed_value
-    end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+
+    humanoid.WalkSpeed = config.speed_value
+
+    -- sürekli güncelle (macro gibi)
+    if speed_connection then speed_connection:Disconnect() end
+    speed_connection = RunService.Heartbeat:Connect(function()
+        if speed_active then
+            if char.Parent and humanoid.Parent then
+                humanoid.WalkSpeed = config.speed_value
+            end
+        end
+    end)
 end
 
 local function reset_speed()
-    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
-        LocalPlayer.Character:FindFirstChildOfClass("Humanoid").WalkSpeed = 16
+    local char = LocalPlayer.Character
+    if char then
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = 16
+        end
+    end
+    if speed_connection then
+        speed_connection:Disconnect()
+        speed_connection = nil
     end
 end
 
 LocalPlayer.CharacterAdded:Connect(function(char)
     task.wait(1)
-    if speed_active then apply_speed() end
+    if speed_active then
+        apply_speed()
+    end
 end)
 
 -- ============================================
@@ -420,7 +544,7 @@ local title_label = Instance.new("TextLabel")
 title_label.Size = UDim2.new(1, -80, 1, 0)
 title_label.Position = UDim2.new(0, 15, 0, 0)
 title_label.BackgroundTransparency = 1
-title_label.Text = "palofsc // hood v3"
+title_label.Text = "palofsc // hood v4"
 title_label.TextColor3 = Color3.fromRGB(180, 180, 255)
 title_label.Font = Enum.Font.Code
 title_label.TextSize = 17
@@ -716,7 +840,6 @@ local function create_dropdown(parent, text, options, default, callback)
     return frame
 end
 
--- KLAVYE + MOUSE KEYBIND
 local function create_keybind(parent, text, default, callback)
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(1, 0, 0, 32)
@@ -756,14 +879,12 @@ local function create_keybind(parent, text, default, callback)
     end)
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if waiting and not gameProcessed then
-            -- klavye
             if input.UserInputType == Enum.UserInputType.Keyboard then
                 if input.KeyCode ~= Enum.KeyCode.Unknown then
                     waiting = false
                     key_btn.Text = input.KeyCode.Name
                     callback(input.KeyCode)
                 end
-            -- mouse
             elseif input.UserInputType == Enum.UserInputType.MouseButton1
                 or input.UserInputType == Enum.UserInputType.MouseButton2
                 or input.UserInputType == Enum.UserInputType.MouseButton3 then
@@ -781,9 +902,6 @@ local function create_keybind(parent, text, default, callback)
     return frame
 end
 
--- ============================================
--- TUŞ EŞLEŞTİRME FONKSİYONU
--- ============================================
 local function is_key_pressed(input, key)
     if typeof(key) == "EnumItem" then
         if key.EnumType == Enum.KeyCode then
@@ -820,17 +938,19 @@ create_toggle(esp_page, "İsim Göster", config.esp_name, function(v) config.esp
 create_toggle(esp_page, "Mesafe Göster", config.esp_distance, function(v) config.esp_distance = v end)
 create_toggle(esp_page, "Can Barı", config.esp_health, function(v) config.esp_health = v end)
 create_toggle(esp_page, "Box ESP", config.esp_box, function(v) config.esp_box = v end)
+create_toggle(esp_page, "Corner Box", config.esp_corner, function(v) config.esp_corner = v end)
 create_toggle(esp_page, "Tracer", config.esp_tracer, function(v) config.esp_tracer = v end)
+create_toggle(esp_page, "Takım Rengi", config.esp_team_color, function(v) config.esp_team_color = v end)
 create_slider(esp_page, "Max Mesafe", 50, 5000, config.esp_max_distance, function(v) config.esp_max_distance = v end)
 
--- MISC SAYFASI (SPEED)
+-- MISC SAYFASI
 create_toggle(misc_page, "Speed Aktif", config.speed_enabled, function(v) config.speed_enabled = v end)
 create_keybind(misc_page, "Speed Tuşu", config.speed_key, function(v) config.speed_key = v end)
 create_slider(misc_page, "Speed Değeri", 16, 500, config.speed_value, function(v)
     config.speed_value = v
     if speed_active then apply_speed() end
 end)
-create_toggle(misc_page, "Toggle Modu (Basılı Tutma)", config.speed_toggle_mode, function(v) config.speed_toggle_mode = v end)
+create_toggle(misc_page, "Toggle Modu", config.speed_toggle_mode, function(v) config.speed_toggle_mode = v end)
 
 -- ============================================
 -- TUŞ KONTROLLERİ
@@ -883,8 +1003,6 @@ UserInputService.InputEnded:Connect(function(input, gameProcessed)
     end
 end)
 
-print("[palofsc] hood v3 yüklendi")
-print("[palofsc] aimlock: " .. tostring(config.aimlock_key))
-print("[palofsc] silent: " .. tostring(config.silent_key))
-print("[palofsc] speed: " .. tostring(config.speed_key))
-print("[palofsc] ui: " .. tostring(config.ui_keybind))
+print("[palofsc] hood v4 yüklendi")
+print("[palofsc] speed fix aktif")
+print("[palofsc] corner box esp eklendi")
