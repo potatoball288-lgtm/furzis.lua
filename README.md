@@ -1,0 +1,1 @@
+# furzis.lua
